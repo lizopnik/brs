@@ -1,3 +1,5 @@
+.env
+*.exe
 # Виртуальное окружение
 .venv/
 venv/
@@ -15,7 +17,7 @@ captures/
 
 # Сгенерированные документы
 output/
-Results/
+Results/ 
 
 # Системные / IDE
 .vscode/
