@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -25,52 +24,10 @@ CAPTURES_DIR.mkdir(exist_ok=True)
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 
-def _try_send_confirmation(fio: str, subject: str) -> None:
-    """
-    Находит преподавателя в teachers.txt по фамилии и предмету
-    и отправляет ему подтверждение о получении БРС.
-    """
-    try:
-        from notify import load_teachers, _normalize, YANDEX_EMAIL
-        import smtplib
-        from email.mime.multipart import MIMEMultipart
-        from email.mime.text import MIMEText
-
-        teachers = load_teachers()
-        last_name = fio.split()[0] if fio else ""
-        target = next(
-            (t for t in teachers
-             if _normalize(t.last_name) == _normalize(last_name)
-             and _normalize(t.subject) == _normalize(subject)),
-            None,
-        )
-        if target is None:
-            print(f"[confirm] Преподаватель не найден в teachers.txt: {fio} / {subject}")
-            return
-
-        password = os.getenv("YANDEX_PASSWORD", "")
-        if not YANDEX_EMAIL or not password:
-            print("[confirm] YANDEX_EMAIL/YANDEX_PASSWORD не заданы")
-            return
-
-        body = (
-            f"Уважаемый(ая) {target.fio},\n\n"
-            f"Ваш БРС по предмету «{target.subject}» успешно получен и сохранен.\n\n"
-            f"С уважением,\nКафедра"
-        )
-        msg = MIMEMultipart()
-        msg["From"] = YANDEX_EMAIL
-        msg["To"] = target.email
-        msg["Subject"] = f"[БРС] Форма по предмету {target.subject} получена"
-        msg.attach(MIMEText(body, "plain", "utf-8"))
-
-        conn = smtplib.SMTP_SSL("smtp.yandex.ru", 465)
-        conn.login(YANDEX_EMAIL, password)
-        conn.sendmail(YANDEX_EMAIL, target.email, msg.as_bytes())
-        conn.quit()
-        print(f"[confirm] Подтверждение отправлено {target.fio} <{target.email}>")
-    except Exception as e:
-        print(f"[confirm] Ошибка: {e!r}")
+# id поля «почта», которое преподаватель вводит в форме (см. captures/)
+ID_EMAIL = 126112461
+# id полей ФИО и дисциплины — для текста письма
+ID_FAMILIYA, ID_IMYA, ID_OTCHESTVO, ID_DISCIPLINA = 125700719, 125700737, 125700764, 125700776
 
 
 @app.get("/")
@@ -126,7 +83,7 @@ async def capture(request: Request) -> JSONResponse:
             doc_path = generate_docx(parsed, BASE_DIR, OUTPUT_DIR)
             print(f"[docx] {doc_path}")
 
-            # Новое: отправляем подтверждение преподавателю
+            # Отправляем готовый документ на email, указанный в форме.
             answer_data = parsed.get("answer", {}).get("data", {})
             id_map = {}
             for entry in answer_data.values():
@@ -136,14 +93,18 @@ async def capture(request: Request) -> JSONResponse:
                     if qid is not None and val is not None:
                         id_map[qid] = str(val)
 
-            familiya = id_map.get(125700719, "").strip()
-            imya = id_map.get(125700737, "").strip()
-            otchestvo = id_map.get(125700764, "").strip()
-            disciplina = id_map.get(125700776, "").strip()
+            email = id_map.get(ID_EMAIL, "").strip()
+            familiya = id_map.get(ID_FAMILIYA, "").strip()
+            imya = id_map.get(ID_IMYA, "").strip()
+            otchestvo = id_map.get(ID_OTCHESTVO, "").strip()
+            disciplina = id_map.get(ID_DISCIPLINA, "").strip()
             fio = " ".join(p for p in (familiya, imya, otchestvo) if p)
 
-            if fio and disciplina:
-                _try_send_confirmation(fio, disciplina)
+            if email:
+                from notify import send_document
+                send_document(email, doc_path, fio, disciplina)
+            else:
+                print("[mail] в форме нет email — письмо не отправлено")
 
         except Exception as exc:
             print(f"[docx ERROR] {exc!r}")

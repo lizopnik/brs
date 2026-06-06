@@ -164,6 +164,58 @@ def _smtp_connection():
     return conn
 
 
+def send_document(to_email: str, doc_path, fio: str = "", subject: str = "") -> bool:
+    """
+    Отправляет сгенерированный .docx во вложении на указанный email
+    (адрес, который преподаватель ввёл в форме).
+    """
+    to_email = (to_email or "").strip()
+    if "@" not in to_email:
+        print(f"[mail] некорректный адрес получателя: {to_email!r}")
+        return False
+
+    doc_path = Path(doc_path)
+    if not doc_path.exists():
+        print(f"[mail] файл не найден: {doc_path}")
+        return False
+
+    greeting = f"Уважаемый(ая) {fio}," if fio else "Здравствуйте,"
+    disc = f" по дисциплине «{subject}»" if subject else ""
+    text = (
+        f"{greeting}\n\n"
+        f"Во вложении — сформированный документ БРС{disc}.\n\n"
+        f"Письмо отправлено автоматически."
+    )
+
+    msg = MIMEMultipart()
+    msg["From"] = YANDEX_EMAIL
+    msg["To"] = to_email
+    msg["Subject"] = "БРС" + (f" — {subject}" if subject else "")
+    msg.attach(MIMEText(text, "plain", "utf-8"))
+
+    with open(doc_path, "rb") as fh:
+        part = MIMEBase(
+            "application",
+            "vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        part.set_payload(fh.read())
+    encoders.encode_base64(part)
+    part.add_header(
+        "Content-Disposition", "attachment", filename=("utf-8", "", doc_path.name)
+    )
+    msg.attach(part)
+
+    try:
+        conn = _smtp_connection()
+        conn.sendmail(YANDEX_EMAIL, to_email, msg.as_bytes())
+        conn.quit()
+        print(f"[mail] документ отправлен на {to_email}")
+        return True
+    except Exception as e:
+        print(f"[mail] ошибка отправки: {e!r}")
+        return False
+
+
 def send_reminders_to_all(teachers: list[Teacher], period_days: int = PERIOD_DAYS) -> None:
     not_submitted = find_not_submitted(teachers, period_days)
     if not not_submitted:
